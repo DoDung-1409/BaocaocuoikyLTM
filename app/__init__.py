@@ -57,9 +57,11 @@ def create_app(config_object=Config):
             return jsonify({"error": "Bạn cần đăng nhập."}), 401
         return redirect(url_for("auth.login", next=request.full_path.rstrip("?")))
 
-    from .routes import auth, file, main, room, user
-    for module in (auth, main, room, file, user):
-        app.register_blueprint(module.bp)
+    
+from .routes import auth, main, room, user
+for module in (auth, main, room, user):
+    app.register_blueprint(module.bp)
+
 
     # --- Xử lý lỗi: không để lộ chi tiết nội bộ ---
     @app.errorhandler(ServiceError)
