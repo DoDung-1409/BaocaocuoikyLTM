@@ -57,10 +57,12 @@ def create_app(config_object=Config):
             return jsonify({"error": "Bạn cần đăng nhập."}), 401
         return redirect(url_for("auth.login", next=request.full_path.rstrip("?")))
 
-    
-from .routes import auth, main, room, user
-for module in (auth, main, room, user):
-    app.register_blueprint(module.bp)
+
+    from .routes import auth, main, room, user
+
+    for module in (auth, main, room, user):
+        app.register_blueprint(module.bp)
+
 
 
     # --- Xử lý lỗi: không để lộ chi tiết nội bộ ---
@@ -113,5 +115,5 @@ for module in (auth, main, room, user):
     # ProxyFix cho Render
     if app.config.get("TRUST_PROXY"):
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
-
+   
     return app
