@@ -14,14 +14,19 @@ def _env_bool(name, default=False):
     return value.strip().lower() in ("1", "true", "yes", "on")
 
 
+
 def _database_url():
     url = os.environ.get("DATABASE_URL")
     if not url:
-        return "sqlite:///" + str(BASE_DIR / "instance" / "connecthub.db")
-    # Render/Heroku cũ có thể trả về "postgres://", SQLAlchemy yêu cầu "postgresql://"
+        db_dir = BASE_DIR / "instance"
+        db_dir.mkdir(parents=True, exist_ok=True)
+        return "sqlite:///" + str(db_dir / "connecthub.db")
+
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
+
     return url
+
 
 
 def _engine_options(url):
