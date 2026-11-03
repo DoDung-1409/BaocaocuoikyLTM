@@ -104,13 +104,13 @@ for module in (auth, main, room, user):
             resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
         return resp
 
-    # Tạo bảng tự động khi dùng SQLite lần đầu (dev). Production dùng `flask db upgrade`.
+   
+    # Tạo bảng tự động khi dùng SQLite lần đầu (dev).
     if app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite") and os.environ.get("AUTO_CREATE_DB", "1") != "0":
         with app.app_context():
             db.create_all()
 
-    # ProxyFix phải bọc NGOÀI CÙNG (sau socketio.init_app) để scheme/host thật từ proxy của Render
-    # được dùng cả cho kiểm tra Origin của Socket.IO lẫn cho cookie Secure.
+    # ProxyFix cho Render
     if app.config.get("TRUST_PROXY"):
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
