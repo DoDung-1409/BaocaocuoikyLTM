@@ -1,3 +1,4 @@
+import json
 import threading
 import time
 from collections import defaultdict, deque
@@ -122,3 +123,37 @@ def list_messages(room_id, before_id=None, after_id=None, limit=30, q=None):
     has_more = len(rows) > limit
     rows = list(reversed(rows[:limit]))
     return rows, has_more
+
+
+def create_file_message(user, room_id, filename, storage_key, mime, size):
+    if not is_member(user.id, room_id):
+        raise ServiceError("Bạn không thuộc phòng này.", 403)
+
+    check_rate_limit(user.id)
+
+    message_type = "image" if mime.startswith("image/") else "file"
+
+    content = json.dumps({
+        "filename": filename,
+        "storage_key": storage_key,
+        "mime": mime,
+        "size": size
+    }, ensure_ascii=False)
+
+    msg = Message(
+        room_id=room_id,
+        sender_id=user.id,
+        content=content,
+        message_type=message_type
+    )
+
+    try:
+        db.session.add(msg)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Lỗi lưu tin nhắn chứa tệp")
+        raise ServiceError("Không thể lưu tin nhắn chứa tệp.", 500)
+
+    return msg
+
