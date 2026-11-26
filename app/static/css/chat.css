@@ -145,3 +145,240 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
   .new-msgs { bottom: 80px; }
 }
 @media (min-width: 1024px) { #app:not(.has-room) { grid-template-columns: 280px minmax(0, 1fr); } }
+
+/* ===== Hình ảnh và tệp đính kèm ===== */
+
+#btn-attach {
+    flex-shrink: 0;
+    font-size: 23px;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+#btn-attach:hover {
+    transform: scale(1.1);
+}
+
+#btn-attach:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.chat-attachment {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 280px;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.chat-image {
+    display: block;
+    width: auto;
+    max-width: 100%;
+    max-height: 320px;
+    object-fit: contain;
+    border-radius: 10px;
+}
+
+.chat-file-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.chat-file-name {
+    font-size: 14px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.chat-file-size {
+    font-size: 12px;
+    opacity: 0.75;
+}
+
+.chat-file-download {
+    display: block;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: rgba(128, 128, 128, 0.15);
+    color: inherit;
+    text-decoration: none;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+    transition: background 0.2s;
+}
+
+.chat-file-download:hover {
+    background: rgba(128, 128, 128, 0.3);
+}
+
+#upload-status {
+    padding: 8px 12px;
+    font-size: 13px;
+    color: #3b82f6;
+    overflow-wrap: anywhere;
+}
+
+#upload-status[hidden],
+#chat-file-input[hidden] {
+    display: none !important;
+}
+
+@media (max-width: 600px) {
+    .chat-attachment {
+        width: 220px;
+        max-width: 100%;
+    }
+
+    .chat-image {
+        max-height: 240px;
+    }
+}
+
+
+/* ===== Xem hình ảnh phóng to ===== */
+
+.chat-image {
+    cursor: zoom-in;
+    transition: opacity 0.2s;
+}
+
+.chat-image:hover {
+    opacity: 0.9;
+}
+
+#dlg-image {
+    position: fixed;
+    inset: 0;
+    margin: auto;
+    width: 94vw;
+    max-width: 1200px;
+    max-height: 94vh;
+    padding: 20px;
+    border: none;
+    border-radius: 14px;
+    background: #111827;
+    color: #ffffff;
+    box-sizing: border-box;
+    overflow: auto;
+}
+
+#dlg-image[open] {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+}
+
+#dlg-image::backdrop {
+    background: rgba(0, 0, 0, 0.88);
+    backdrop-filter: blur(5px);
+}
+
+#preview-image {
+    display: block;
+    max-width: 100%;
+    max-height: 78vh;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border-radius: 8px;
+}
+
+.image-viewer-close {
+    align-self: flex-end;
+    flex-shrink: 0;
+    width: 38px;
+    height: 38px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    color: #ffffff;
+    font-size: 20px;
+    cursor: pointer;
+}
+
+.image-viewer-close:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.image-viewer-name {
+    max-width: 100%;
+    font-size: 14px;
+    color: #d1d5db;
+    text-align: center;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+    #dlg-image {
+        width: 96vw;
+        padding: 10px;
+    }
+
+    #preview-image {
+        max-height: 75vh;
+    }
+}
+
+
+/* ===== Biểu tượng định dạng tệp ===== */
+
+.chat-file-name {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.file-type-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+    border-radius: 8px;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.file-label {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.file-pdf {
+    background: #dc2626;
+}
+
+.file-word {
+    background: #2563eb;
+}
+
+.file-excel {
+    background: #15803d;
+}
+
+.file-text {
+    background: #64748b;
+}
+
+.file-image {
+    background: #9333ea;
+}
+
+.file-other {
+    background: #475569;
+}
