@@ -1,8 +1,14 @@
-from flask import Blueprint, jsonify, request
+import uuid
+import json
+
+from flask import Blueprint, jsonify, request, current_app, send_file
+from werkzeug.utils import secure_filename
+from ..services import file_service
+from ..services.errors import ServiceError
 from flask_login import current_user, login_required
 
 from ..extensions import db, socketio
-from ..models import Room, RoomMember, User
+from ..models import Room, RoomMember, User, Message
 from ..services import chat_service, room_service
 from ..services.validation import as_int, json_dict
 from ..sockets import presence
@@ -140,3 +146,101 @@ def search_users():
              .filter(db.or_(User.username.ilike(like, escape="\\"), User.full_name.ilike(like, escape="\\")))
              .order_by(User.full_name.asc()).limit(10).all())
     return jsonify({"users": [u.to_dict() for u in users]})
+
+
+@bp.post("/rooms/<int:room_id>/files")
+@login_required
+def upload_chat_file(room_id):
+    room_service.require_member(current_user, room_id)
+
+    uploaded = request.files.get("file")
+
+    ext, mime, size = file_service.validate_chat_file(uploaded)
+
+    filename = secure_filename(uploaded.filename)
+    if not filename:
+        filename = f"attachment.{ext}"
+
+    storage_key = f"chat/{room_id}/{uuid.uuid4().hex}.{ext}"
+
+    storage = current_app.extensions["storage"]
+
+    try:
+        storage.save(storage_key, uploaded.stream, mime)
+
+        msg = chat_service.create_file_message(
+            current_user,
+            room_id,
+            filename,
+            storage_key,
+            mime,
+            size
+        )
+
+    except Exception:
+        try:
+            storage.delete(storage_key)
+        except Exception:
+            current_app.logger.exception("Lỗi xóa tệp")
+
+        raise
+
+    payload = chat_service.serialize_message(msg)
+
+    socketio.emit(
+        "message:new",
+        payload,
+        to=f"room:{room_id}"
+    )
+
+    return jsonify({
+        "ok": True,
+        "message": payload
+    }), 201
+
+
+@bp.get("/rooms/<int:room_id>/files/<int:message_id>")
+@login_required
+def download_chat_file(room_id, message_id):
+    room_service.require_member(current_user, room_id)
+
+    msg = Message.query.filter_by(
+        id=message_id,
+        room_id=room_id
+    ).first()
+
+    if msg is None or msg.message_type not in ("image", "file"):
+        raise ServiceError("Không tìm thấy tệp.", 404)
+
+    try:
+        metadata = json.loads(msg.content)
+        storage_key = metadata["storage_key"]
+        filename = metadata["filename"]
+        mime = metadata["mime"]
+    except (ValueError, KeyError, TypeError):
+        raise ServiceError("Thông tin tệp không hợp lệ.", 500)
+
+    storage = current_app.extensions["storage"]
+
+    try:
+        file_obj = storage.open(storage_key)
+    except Exception:
+        current_app.logger.exception("Lỗi đọc tệp")
+        raise ServiceError("Không thể truy cập tệp.", 404)
+
+    response = send_file(
+        file_obj,
+        mimetype=mime,
+       as_attachment=(
+    msg.message_type != "image"
+    or mime not in ("image/jpeg", "image/png", "image/webp")
+    or request.args.get("download") == "1"
+),
+        download_name=filename,
+        max_age=0
+    )
+
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Cache-Control"] = "private, no-store"
+
+    return response

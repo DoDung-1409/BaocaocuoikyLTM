@@ -1,6 +1,7 @@
 """Các tiện ích kiểm tra và lưu ảnh đại diện (không hỗ trợ gửi file trong phòng chat)."""
 import os
 import uuid
+import zipfile
 
 from flask import current_app
 
@@ -53,3 +54,92 @@ def delete_keys(keys):
             storage.delete(key)
         except Exception:
             current_app.logger.exception("Không xóa được ảnh đại diện cũ")
+
+
+
+def validate_chat_file(file_storage):
+    if file_storage is None or not file_storage.filename:
+        raise ServiceError("Bạn chưa chọn tệp.")
+
+    ext = os.path.splitext(
+        file_storage.filename
+    )[1].lower().lstrip(".")
+
+    allowed = {
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "png": "image/png",
+        "webp": "image/webp",
+        "pdf": "application/pdf",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "txt": "text/plain",
+    }
+
+    if ext not in allowed:
+        raise ServiceError("Định dạng tệp không được hỗ trợ.")
+
+    stream = file_storage.stream
+    stream.seek(0, os.SEEK_END)
+    size = stream.tell()
+    stream.seek(0)
+
+    if size <= 0:
+        raise ServiceError("Tệp không có nội dung.")
+
+    if size > 10 * 1024 * 1024:
+        raise ServiceError("Dung lượng tệp tối đa là 10 MB.", 413)
+
+    head = stream.read(12)
+    stream.seek(0)
+
+    valid = False
+
+    try:
+        if ext in ("jpg", "jpeg"):
+            valid = head.startswith(b"\xff\xd8\xff")
+
+        elif ext == "png":
+            valid = head.startswith(b"\x89PNG\r\n\x1a\n")
+
+        elif ext == "webp":
+            valid = (
+                head[:4] == b"RIFF"
+                and head[8:12] == b"WEBP"
+            )
+
+        elif ext == "pdf":
+            valid = head.startswith(b"%PDF-")
+
+        elif ext in ("docx", "xlsx"):
+            with zipfile.ZipFile(stream) as archive:
+                names = set(archive.namelist())
+
+                required = (
+                    "word/document.xml"
+                    if ext == "docx"
+                    else "xl/workbook.xml"
+                )
+
+                valid = (
+                    "[Content_Types].xml" in names
+                    and required in names
+                )
+
+        elif ext == "txt":
+            raw = stream.read()
+            raw.decode("utf-8-sig")
+            valid = b"\x00" not in raw
+
+    except (zipfile.BadZipFile, UnicodeError, OSError):
+        valid = False
+
+    finally:
+        stream.seek(0)
+
+    if not valid:
+        raise ServiceError(
+            "Nội dung tệp không khớp với định dạng."
+        )
+
+    return ext, allowed[ext], size

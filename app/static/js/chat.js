@@ -1,19 +1,16 @@
-/* ConnectHub - giao diện chat.
- * Quy tắc an toàn: mọi nội dung do người dùng gửi (tin nhắn, tên, tên file) chỉ được gán bằng textContent,
- * KHÔNG BAO GIỜ dùng innerHTML → chống XSS. Dữ liệu chat luôn nằm ở server, trình duyệt chỉ giữ trạng thái hiển thị. */
+
 (function () {
   "use strict";
-
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var app = $("#app");
   var CSRF = $('meta[name="csrf-token"]').content;
-
-  var state = {
+ var state = {
     me: null, rooms: [], room: null, members: [], messages: [], hasMore: false,
     pending: {}, socket: null, connectedBefore: false, unreadTotal: 0, nearBottom: true,
-    readTimer: null
-  };
-
+    readTimer: null,
+    onlineUsers: {},
+    presenceReady: false
+};
   /* ---------- Tiện ích ---------- */
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -78,7 +75,6 @@
       try { document.execCommand("copy") ? resolve() : reject(); } catch (e) { reject(e); } ta.remove();
     });
   }
-
   /* ---------- Drawer (mobile) và hộp thoại ---------- */
   function closeDrawers() {
     $("#left").classList.remove("open"); $("#right").classList.remove("open"); $("#backdrop").hidden = true;
@@ -91,7 +87,6 @@
   document.querySelectorAll("[data-close-drawer]").forEach(function (b) { b.addEventListener("click", closeDrawers); });
   document.querySelectorAll("[data-dlg-close]").forEach(function (b) { b.addEventListener("click", function () { b.closest("dialog").close(); }); });
   $("#btn-theme").addEventListener("click", function () { window.toggleTheme(); });
-
   function dlgError(form, msg) { var p = $(".dlg-error", form); if (p) p.textContent = msg || ""; }
   function confirmDialog(title, text, onOk) {
     $("#confirm-title").textContent = title; $("#confirm-text").textContent = text;
@@ -99,7 +94,6 @@
     ok.onclick = function () { dlg.close(); onOk(); };
     dlg.showModal();
   }
-
   /* ---------- Trạng thái kết nối ---------- */
   var bannerTimer = null;
   function setBanner(kind, text) {
@@ -108,17 +102,14 @@
     b.className = "conn-banner " + kind; b.textContent = text; b.hidden = false;
     if (kind === "ok") bannerTimer = setTimeout(function () { b.hidden = true; }, 2500);
   }
-
   /* ---------- Danh sách phòng ---------- */
   function totalUnread() { return state.rooms.reduce(function (s, r) { return s + (r.unread || 0); }, 0); }
   function updateTitle() { var n = totalUnread(); document.title = (n ? "(" + n + ") " : "") + "ConnectHub"; }
-
   function roomItem(r) {
     var li = el("li"), b = el("button", "room-item" + (state.room && state.room.id === r.id ? " active" : ""));
     b.type = "button";
     if (r.is_direct && r.peer) { var av = el("span", "avatar"); setAvatar(av, r.peer); b.appendChild(av); }
     b.appendChild(el("span", "name", (r.is_direct ? "" : "# ") + r.room_name));
-
     if (r.unread) b.appendChild(el("span", "badge", r.unread > 99 ? "99+" : String(r.unread)));
     b.addEventListener("click", function () { openRoom(r.id); closeDrawers(); });
     li.appendChild(b); return li;
@@ -143,9 +134,58 @@
       renderRooms();
     });
   }
-
   /* ---------- Hiển thị tin nhắn ---------- */
   function buildMessage(m, prev) {
+
+// Nhận diện định dạng tệp đính kèm
+function getFileType(filename) {
+    var ext = filename.split(".").pop().toLowerCase();
+
+    switch (ext) {
+        case "pdf":
+            return { label: "PDF", css: "file-pdf" };
+
+        case "docx":
+            return { label: "DOCX", css: "file-word" };
+
+        case "xlsx":
+            return { label: "XLSX", css: "file-excel" };
+
+        case "txt":
+            return { label: "TXT", css: "file-text" };
+
+        case "jpg":
+        case "jpeg":
+        case "png":
+        case "webp":
+            return { label: "IMG", css: "file-image" };
+
+        default:
+            return { label: "FILE", css: "file-other" };
+    }
+}
+
+
+  function messagePreview(m) {
+    if (m.type === "image" || m.type === "file") {
+      try {
+        var attachment = JSON.parse(m.content);
+
+        if (m.type === "image") {
+          return "🖼 Hình ảnh: " + attachment.filename;
+        }
+
+        return "📎 Tệp: " + attachment.filename;
+
+      } catch (err) {
+        return "Tệp đính kèm";
+      }
+    }
+
+    return m.content || "";
+  }
+
+
     var frag = document.createDocumentFragment();
     if (!prev || dayKey(prev.created_at) !== dayKey(m.created_at)) frag.appendChild(el("div", "day-sep", fmtDay(m.created_at)));
     if (m.type === "system") { frag.appendChild(el("div", "sys-msg", m.content)); return frag; }
@@ -153,8 +193,88 @@
     var row = el("div", "msg" + (own ? " own" : "")); row.dataset.id = m.id || ""; if (m.client_msg_id) row.dataset.cid = m.client_msg_id;
     var av = el("span", "avatar"); setAvatar(av, m.sender); row.appendChild(av);
     var bubble = el("div", "bubble");
-    if (!own && state.room && !state.room.is_direct) bubble.appendChild(el("div", "who", m.sender.full_name));
-    bubble.appendChild(el("div", "text", m.content));
+    
+    if (m.type === "image" || m.type === "file") {
+      try {
+        var attachment = JSON.parse(m.content);
+
+        var fileUrl = "/api/rooms/" + m.room_id +
+                      "/files/" + m.id;
+
+        var fileBox = el("div", "chat-attachment");
+
+        // Hiển thị hình ảnh trực tiếp
+        if (m.type === "image") {
+          var img = el("img", "chat-image");
+          img.src = fileUrl;
+          img.alt = attachment.filename;
+          img.loading = "lazy";
+          img.addEventListener("click", function () {
+    $("#preview-image").src = fileUrl;
+    $("#preview-image").alt = attachment.filename;
+    $("#preview-image-name").textContent = attachment.filename;
+    $("#dlg-image").showModal();
+});
+          fileBox.appendChild(img);
+        }
+
+        // Hiển thị thông tin tệp
+        var fileInfo = el("div", "chat-file-info");
+
+        
+// Hiển thị biểu tượng theo định dạng tệp
+var fileType = getFileType(attachment.filename);
+
+var fileName = el("div", "chat-file-name");
+
+var fileIcon = el(
+    "span",
+    "file-type-icon " + fileType.css,
+    fileType.label
+);
+
+var fileLabel = el(
+    "span",
+    "file-label",
+    attachment.filename
+);
+
+fileName.appendChild(fileIcon);
+fileName.appendChild(fileLabel);
+
+
+        var fileSize = el(
+          "small",
+          "chat-file-size",
+          fmtSize(attachment.size)
+        );
+
+        fileInfo.appendChild(fileName);
+        fileInfo.appendChild(fileSize);
+
+        // Nút tải xuống
+        var download = el(
+          "a",
+          "chat-file-download",
+          "⬇ Tải xuống"
+        );
+
+        download.href = fileUrl + "?download=1";
+        download.setAttribute("download", attachment.filename);
+
+        fileBox.appendChild(fileInfo);
+        fileBox.appendChild(download);
+        bubble.appendChild(fileBox);
+
+      } catch (err) {
+        bubble.appendChild(
+          el("div", "text", "Không thể hiển thị tệp đính kèm.")
+        );
+      }
+    } else {
+      bubble.appendChild(el("div", "text", m.content));
+    }
+
     var meta = el("div", "meta", m.created_at ? fmtTime(m.created_at) : "");
     if (own && m.id) meta.textContent += " · Đã gửi";
     bubble.appendChild(meta); row.appendChild(bubble); frag.appendChild(row);
@@ -171,7 +291,6 @@
     if (state.nearBottom) $("#btn-new-msgs").hidden = true;
   });
   $("#btn-new-msgs").addEventListener("click", scrollBottom);
-
   function lastMessageId() { for (var i = state.messages.length - 1; i >= 0; i--) if (state.messages[i].id) return state.messages[i].id; return 0; }
   function addMessage(m) {
     if (state.messages.some(function (x) { return x.id === m.id; })) return false;
@@ -194,7 +313,6 @@
       renderRooms();
     }, 400);
   }
-
   /* ---------- Mở phòng ---------- */
   function setLoading(on) { $("#loading").hidden = !on; }
   function openRoom(id) {
@@ -224,6 +342,20 @@
     var r = state.room;
     $("#room-title").textContent = (r.is_direct ? "" : "# ") + r.room_name;
     $("#room-desc").textContent = r.is_direct ? (r.peer && r.peer.status_text) || "Cuộc trò chuyện cá nhân" : (r.description || "Chưa có mô tả");
+    
+// Hiển thị trạng thái người đang trò chuyện
+if (r.is_direct && state.me) {
+    var peer = (state.members || []).find(function (m) {
+        return m.id !== state.me.id;
+    });
+
+    if (peer) {
+        var desc = $("#room-desc");
+        desc.textContent = "";
+        desc.appendChild(presenceBadge(peer.id));
+    }
+}
+
     $("#info-desc").textContent = r.is_direct ? "Cuộc trò chuyện riêng giữa hai người." : (r.description || "Chưa có mô tả");
     $("#info-created").textContent = new Date(r.created_at).toLocaleDateString("vi-VN");
     $("#invite-box").hidden = r.is_direct;
@@ -234,13 +366,24 @@
     $("#btn-delete-room").hidden = r.is_direct || r.owner_id !== state.me.id;
     $("#btn-leave-room").hidden = r.is_direct || r.owner_id === state.me.id;
   }
+  function presenceBadge(userId) {
+    var status = state.presenceReady ? state.onlineUsers[userId] === true : undefined;
+    var label = status === true ? "Online" :
+                status === false ? "Offline" : "Chưa xác định";
+    var dot = el("span", null, "● " + label);
+    dot.style.color = status === true ? "#22c55e" : "#9ca3af";
+    dot.style.fontSize = "12px";
+    dot.style.marginLeft = "8px";
+    return dot;
+}
   function renderMembers() {
     var ul = $("#member-list"); ul.textContent = ""; $("#member-count").textContent = state.members.length;
     state.members.forEach(function (m) {
       var li = el("li"), av = el("span", "avatar"); setAvatar(av, m); li.appendChild(av);
       var info = el("span", "info"); info.appendChild(el("b", null, m.full_name + (m.id === state.me.id ? " (bạn)" : "")));
       info.appendChild(el("small", null, m.status_text || "@" + m.username)); li.appendChild(info);
-      if (m.role === "admin") li.appendChild(el("span", "tag", "Chủ phòng"));
+    if (m.role === "admin") li.appendChild(el("span", "tag", "Chủ phòng"));
+      li.appendChild(presenceBadge(m.id));
       ul.appendChild(li);
     });
   }
@@ -261,7 +404,6 @@
       box.scrollTop = box.scrollHeight - prevH;
     }).catch(function (e) { toast("Lỗi", e.message, true); });
   });
-
   /* ---------- Gửi tin nhắn (qua WebSocket, chỉ hiển thị "đã gửi" sau khi server xác nhận) ---------- */
   var input = $("#msg-input");
   function autoGrow() { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 140) + "px"; }
@@ -271,6 +413,95 @@
     if (e.key === "Enter" && !e.shiftKey && !coarse) { e.preventDefault(); sendMessage(); }
   });
   $("#btn-send").addEventListener("click", sendMessage);
+  
+// Đóng ảnh phóng to
+var imageDialog = $("#dlg-image");
+var closeImageButton = $("#btn-close-image");
+
+if (imageDialog && closeImageButton) {
+
+    closeImageButton.addEventListener("click", function () {
+        imageDialog.close();
+    });
+
+    imageDialog.addEventListener("click", function (e) {
+        if (e.target === this) {
+            this.close();
+        }
+    });
+
+    imageDialog.addEventListener("close", function () {
+        $("#preview-image").removeAttribute("src");
+        $("#preview-image-name").textContent = "";
+    });
+
+}
+
+
+  // ---------- Gửi hình ảnh và tài liệu ----------
+
+  $("#btn-attach").addEventListener("click", function () {
+    if (!state.room || !state.me) return;
+    $("#chat-file-input").click();
+  });
+
+  $("#chat-file-input").addEventListener("change", function (e) {
+    var file = e.target.files[0];
+    e.target.value = "";
+
+    if (!file || !state.room || !state.me) return;
+
+    if (file.size > 10 * 1024 * 1024) {
+      toast("Không thể gửi tệp", "Dung lượng tối đa là 10 MB.", true);
+      return;
+    }
+
+    var roomId = state.room.id;
+    var fd = new FormData();
+    fd.append("file", file);
+
+    var status = $("#upload-status");
+    var btn = $("#btn-attach");
+
+    btn.disabled = true;
+    status.hidden = false;
+    status.textContent = "Đang gửi: " + file.name;
+
+    fetch("/api/rooms/" + roomId + "/files", {
+      method: "POST",
+      headers: {
+        "X-CSRFToken": CSRF
+      },
+      body: fd,
+      credentials: "same-origin"
+    })
+    .then(function (res) {
+      return res.json().catch(function () {
+        return {};
+      }).then(function (data) {
+        if (!res.ok || !data.message) {
+          throw new Error(data.error || "Gửi tệp thất bại (" + res.status + ").");
+        }
+        return data;
+      });
+    })
+    .then(function (data) {
+      if (state.room && state.room.id === roomId) {
+        addMessage(data.message);
+        scheduleRead();
+      }
+
+      toast("Đã gửi tệp", file.name);
+    })
+    .catch(function (err) {
+      toast("Gửi tệp thất bại", err.message, true);
+    })
+    .finally(function () {
+      btn.disabled = false;
+      status.hidden = true;
+      status.textContent = "";
+    });
+  });
 
   function askNotifyPermission() {
     if ("Notification" in window && Notification.permission === "default") { try { Notification.requestPermission(); } catch (e) {} }
@@ -306,7 +537,6 @@
     state.pending[cid] = entry; input.value = ""; autoGrow(); scrollBottom();
     transmit(entry);
   }
-
   /* ---------- Socket.IO ---------- */
   function connectSocket() {
     var s = io({ transports: ["websocket", "polling"], reconnectionDelayMax: 5000 });
@@ -318,14 +548,42 @@
         loadRooms(); resync();
       } else setBanner(null);
       state.connectedBefore = true;
+      s.emit("presence:request");
       Object.keys(state.pending).forEach(function (cid) {  // thử gửi lại tin còn treo; server khử trùng bằng client_msg_id
         var p = state.pending[cid]; if (p.node.classList.contains("failed")) return; transmit(p);
       });
     });
-    s.on("disconnect", function () { setBanner("offline", "Mất kết nối. Đang thử kết nối lại…"); });
+    s.on("disconnect", function () {
+      state.presenceReady = false;
+      state.onlineUsers = {};
+      if (state.room && state.room.created_at) renderMembers();
+      setBanner("offline", "Mất kết nối. Đang thử kết nối lại…");
+    });
     s.io.on("reconnect_attempt", function () { setBanner("warn", "Đang kết nối lại…"); });
     s.on("connect_error", function () { setBanner("offline", "Không kết nối được máy chủ. Đang thử lại…"); });
-    s.on("message:new", onMessageNew);
+ s.on("message:new", onMessageNew);
+ s.on("presence:initial", function (p) {
+    if (!p || !Array.isArray(p.online_users)) return;
+    state.onlineUsers = {};
+    p.online_users.forEach(function (uid) {
+        state.onlineUsers[uid] = true;
+    });
+    state.presenceReady = true;
+    renderRooms();
+    if (state.room && state.room.created_at) {
+        renderHeader();
+        renderMembers();
+    }
+});
+s.on("presence:changed", function (p) {
+    if (!p || p.user_id == null) return;
+    state.onlineUsers[p.user_id] = p.is_online === true;
+    renderRooms();
+    if (state.room && state.room.created_at) {
+        renderHeader();
+        renderMembers();
+    }
+});
     s.on("rooms:changed", loadRooms);
     s.on("members:changed", function (p) { if (state.room && state.room.id === p.room_id) refreshMembers(); });
     s.on("room:updated", function (r) {
@@ -361,14 +619,13 @@
       state.rooms.forEach(function (r) { if (r.id === m.room_id) r.unread = (r.unread || 0) + 1; });
       renderRooms();
       var room = state.rooms.filter(function (r) { return r.id === m.room_id; })[0];
-      var preview = m.content.slice(0, 120);
+      var preview = messagePreview(m).slice(0, 120);
       var title = (room ? room.room_name + " · " : "") + m.sender.full_name;
       toast(title, preview);
       if (document.hidden && "Notification" in window && Notification.permission === "granted") { try { new Notification(title, { body: preview }); } catch (e) {} }
     }
   }
   document.addEventListener("visibilitychange", function () { if (!document.hidden) scheduleRead(); });
-
   /* ---------- Hộp thoại: tạo phòng, nhập mã, sửa phòng, tài khoản ---------- */
   function submitting(form, on) { form.querySelectorAll("button[type=submit]").forEach(function (b) { b.disabled = on; }); }
   $("#btn-create-room").addEventListener("click", function () { $("#form-create").reset(); dlgError($("#form-create")); $("#dlg-create").showModal(); });
@@ -411,7 +668,6 @@
   });
   $("#btn-copy-link").addEventListener("click", function () { copyText($("#invite-link").value).then(function () { toast("Đã chép link mời"); }, function () { toast("Không chép được", "Hãy chép thủ công.", true); }); });
   $("#btn-copy-code").addEventListener("click", function () { copyText($("#invite-code").value).then(function () { toast("Đã chép mã phòng"); }, function () { toast("Không chép được", "Hãy chép thủ công.", true); }); });
-
   function renderMe() {
     setAvatar($("#me-avatar"), state.me); setAvatar($("#set-avatar"), state.me);
     $("#me-name").textContent = state.me.full_name; $("#me-status").textContent = state.me.status_text || "@" + state.me.username;
@@ -436,7 +692,6 @@
       .catch(function (err) { dlgError($("#form-settings"), err.message); });
   });
   $("#logout-form").addEventListener("submit", function () { if (state.socket) state.socket.disconnect(); });
-
   /* ---------- Tìm kiếm ---------- */
   var searchUsers = debounce(function () {
     var q = $("#side-search").value.trim(), box = $("#user-results");
@@ -448,7 +703,6 @@
         var li = el("li"), b = el("button", "room-item"); b.type = "button";
         var av = el("span", "avatar"); setAvatar(av, u); b.appendChild(av);
         var name = el("span", "name", u.full_name + " (@" + u.username + ")"); b.appendChild(name);
-
         b.addEventListener("click", function () {
           api("/api/dm", { method: "POST", json: { user_id: u.id } }).then(function (r) {
             $("#side-search").value = ""; box.hidden = true;
@@ -460,7 +714,6 @@
     }).catch(function () {});
   }, 300);
   $("#side-search").addEventListener("input", function () { renderRooms(); searchUsers(); });
-
   $("#btn-room-search").addEventListener("click", function () {
     var p = $("#search-panel"); p.hidden = !p.hidden; if (!p.hidden) $("#room-search-input").focus();
   });
@@ -472,13 +725,12 @@
       if (!state.room || state.room.id !== id) return;
       if (!d.messages.length) ul.appendChild(el("li", null, "Không có tin nhắn phù hợp."));
       d.messages.slice().reverse().forEach(function (m) {
-        var li = el("li", null, m.content);
+       var li = el("li", null, messagePreview(m));
         li.appendChild(el("small", null, m.sender.full_name + " · " + fmtDay(m.created_at) + " " + fmtTime(m.created_at)));
         ul.appendChild(li);
       });
     }).catch(function (e) { ul.appendChild(el("li", null, e.message)); });
   }, 300));
-
   /* ---------- Khởi động ---------- */
   api("/api/me").then(function (d) {
     state.me = d.user; renderMe(); connectSocket();

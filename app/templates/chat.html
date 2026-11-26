@@ -64,12 +64,31 @@
       <div id="loading" class="loading" hidden><span class="spinner"></span> Đang tải…</div>
     </section>
     <button id="btn-new-msgs" class="new-msgs" type="button" hidden>↓ Tin nhắn mới</button>
-    <footer class="composer" id="composer" hidden>
-<div class="composer-row">
-<textarea id="msg-input" rows="1" placeholder="Nhập tin nhắn…" maxlength="{{ config.MAX_MESSAGE_LENGTH }}" aria-label="Nhập tin nhắn"></textarea>
-        <button class="btn btn-primary send" id="btn-send" type="button" aria-label="Gửi">Gửi ➤</button>
-      </div>
-    </footer>
+    
+<footer class="composer" id="composer" hidden>
+    <div id="upload-status" class="upload-status" role="status" hidden></div>
+
+    <div class="composer-row">
+
+        <button class="icon-btn" id="btn-attach" type="button"
+                aria-label="Đính kèm tệp" title="Gửi hình ảnh hoặc tài liệu">
+            📎
+        </button>
+
+        <input type="file" id="chat-file-input" hidden
+               accept=".jpg,.jpeg,.png,.webp,.pdf,.docx,.xlsx,.txt">
+
+        <textarea id="msg-input" rows="1"
+                  placeholder="Nhập tin nhắn…"
+                  maxlength="{{ config.MAX_MESSAGE_LENGTH }}"
+                  aria-label="Nhập tin nhắn"></textarea>
+
+        <button class="btn btn-primary send" id="btn-send"
+                type="button" aria-label="Gửi">Gửi ➤</button>
+
+    </div>
+</footer>
+
   </main>
 
   <!-- ===== Sidebar phải: thành viên, thông tin, file ===== -->
@@ -133,6 +152,23 @@
     <h3 id="confirm-title"></h3><p id="confirm-text" class="muted"></p>
     <div class="dlg-actions"><button class="btn" type="button" data-dlg-close>Hủy</button><button class="btn btn-danger" id="confirm-ok" type="button">Đồng ý</button></div>
   </form></dialog>
+
+  
+  <!-- ===== Xem hình ảnh phóng to ===== -->
+  <dialog id="dlg-image" class="image-viewer">
+    <button id="btn-close-image"
+            class="image-viewer-close"
+            type="button"
+            aria-label="Đóng hình ảnh">
+      ✕
+    </button>
+
+    <img id="preview-image" alt="Hình ảnh phóng to">
+
+    <div id="preview-image-name"
+         class="image-viewer-name"></div>
+  </dialog>
+
 
   <div id="toasts" class="toasts" aria-live="polite"></div>
 </div>
