@@ -73,12 +73,14 @@ class Config:
     MAX_MESSAGE_LENGTH = int(os.environ.get("MAX_MESSAGE_LENGTH", 2000))
     MSG_RATE_LIMIT = (int(os.environ.get("MSG_RATE_COUNT", 10)), float(os.environ.get("MSG_RATE_WINDOW", 10)))
     REGISTER_RATE_LIMIT = int(os.environ.get("REGISTER_RATE_COUNT", 20))  # số lần đăng ký / giờ / IP
-    MAX_CONTENT_LENGTH = 3 * 1024 * 1024  # giới hạn upload ảnh đại diện
+    MAX_CONTENT_LENGTH = 12 * 1024 * 1024  # giới hạn dung lượng yêu cầu HTTP
     HISTORY_PAGE_SIZE = 30
     TRUST_PROXY = _env_bool("TRUST_PROXY", IS_PRODUCTION)
 
-    # Lưu ảnh đại diện cục bộ
+     # Lưu ảnh đại diện và tệp đính kèm cục bộ
     UPLOAD_DIR = os.environ.get("UPLOAD_DIR", str(BASE_DIR / "uploads"))
+
+
 
 
 class TestConfig(Config):
